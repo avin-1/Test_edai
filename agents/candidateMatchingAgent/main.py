@@ -3,15 +3,15 @@ import json
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer, util
+from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity # <-- This import was missing
 
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 JOB_PROFILE_DIR = os.path.join(SCRIPT_DIR, "input/job_profiles")
 CANDIDATE_PROFILES_DIR = os.path.join(SCRIPT_DIR, "input/candidate_profiles")
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, "output")
-MODEL_NAME = 'all-MiniLM-L6-v2'  # A good starting model for semantic similarity
+MODEL_NAME = 'all-MiniLM-L6-v2' # A good starting model for semantic similarity
 
 # Ensure directories exist
 os.makedirs(JOB_PROFILE_DIR, exist_ok=True)
@@ -64,8 +64,15 @@ def get_candidate_profiles():
 
 def calculate_keyword_match_score(job_skills, candidate_skills):
     """
-    Calculates a match score using TF-IDF.
+    Calculates a match score based on shared keywords (skills).
+    Uses a simple intersection over union (Jaccard similarity) approach.
     """
+    if not candidate_skills or not job_skills:
+        return 0.0
+
+    # Ensure skills are in a consistent format (lowercase list of strings)
+    job_skills_set = set(skill.lower() for skill in job_skills)
+
     # Candidate skills might be in a nested dictionary
     candidate_skill_list = []
     if isinstance(candidate_skills, dict):
@@ -75,52 +82,46 @@ def calculate_keyword_match_score(job_skills, candidate_skills):
     elif isinstance(candidate_skills, list):
         candidate_skill_list = [skill.lower() for skill in candidate_skills]
 
-    if not candidate_skill_list or not job_skills:
+    candidate_skills_set = set(candidate_skill_list)
+
+    if not candidate_skills_set:
         return 0.0
 
-    documents = [" ".join(job_skills)] + [" ".join(candidate_skill_list)]
-    
-    vectorizer = TfidfVectorizer().fit_transform(documents)
-    
-    # Calculate cosine similarity between the job profile and candidate profile
-    # The first document is the job profile, the second is the candidate profile
-    cosine_similarity_matrix = cosine_similarity(vectorizer[0:1], vectorizer[1:])[0]
-    
-    # Return the first (and only) score
-    return cosine_similarity_matrix[0]
+    intersection = job_skills_set.intersection(candidate_skills_set)
+    union = job_skills_set.union(candidate_skills_set)
 
+    return len(intersection) / len(union) if union else 0.0
 
 def calculate_semantic_match_score(job_desc, candidate_exp):
     """
-    Calculates a holistic semantic match score.
+    Calculates a semantic match score using sentence embeddings.
     Compares the job responsibilities with the candidate's work experience.
     """
     if not job_desc or not candidate_exp:
         return 0.0
 
-    # Candidate experience is a list of dicts or strings, filter out empty ones
-    candidate_docs = []
-    for exp in candidate_exp:
-        if isinstance(exp, dict) and exp.get('responsibilities'):
-            candidate_docs.append(" ".join(exp.get('responsibilities')))
-        elif isinstance(exp, str) and exp.strip():
-            candidate_docs.append(exp)
+    # Join lists of strings into single documents
+    job_doc = " ".join(job_desc)
+
+    # Candidate experience is a list of dicts, filter out empty ones
+    candidate_docs = [" ".join(exp.get('responsibilities', [])) for exp in candidate_exp if exp.get('responsibilities')]
 
     if not candidate_docs:
         return 0.0
 
-    # Create embeddings for both job responsibilities and all candidate experience chunks
-    job_embeddings = model.encode(job_desc, convert_to_tensor=True)
+    # Create embeddings
+    job_embedding = model.encode(job_doc, convert_to_tensor=True)
     candidate_embeddings = model.encode(candidate_docs, convert_to_tensor=True)
 
-    # Compute a full similarity matrix comparing every job sentence to every candidate sentence
-    cosine_scores = util.pytorch_cos_sim(job_embeddings, candidate_embeddings)
+    # Compute cosine similarities
+    cosine_scores = util.pytorch_cos_sim(job_embedding, candidate_embeddings)
 
-    # Aggregate scores holistically by taking the average
+    # We take the max score, assuming the most relevant job experience is the best match
     if cosine_scores.numel() > 0:
-        return torch.mean(cosine_scores).item()
+        return torch.max(cosine_scores).item()
     else:
         return 0.0
+
 
 # --- Main Orchestration ---
 
@@ -134,6 +135,7 @@ def run_matching_pipeline(job_profile, candidate_profiles):
         print("Missing job profile or candidate profiles.")
         return []
 
+    # Process each candidate
     results = []
     job_skills = job_profile.get('required_skills', [])
     job_responsibilities = job_profile.get('responsibilities', [])
@@ -147,9 +149,8 @@ def run_matching_pipeline(job_profile, candidate_profiles):
 
         keyword_score = calculate_keyword_match_score(job_skills, candidate_skills)
         semantic_score = calculate_semantic_match_score(job_responsibilities, candidate_experience)
-        
-        final_score = (0.4 * keyword_score) + (0.6 * semantic_score)
 
+        final_score = (0.4 * keyword_score) + (0.6 * semantic_score)
 
         results.append({
             "candidate_name": candidate_name,
@@ -159,6 +160,7 @@ def run_matching_pipeline(job_profile, candidate_profiles):
             "final_match_score": round(final_score, 2)
         })
 
+    # Rank candidates
     ranked_candidates = sorted(results, key=lambda x: x['final_match_score'], reverse=True)
     print(f"Successfully ranked {len(ranked_candidates)} candidates.")
     return ranked_candidates
@@ -173,7 +175,6 @@ def main_file_based():
     candidate_profiles = get_candidate_profiles()
 
     ranked_candidates = run_matching_pipeline(job_profile, candidate_profiles)
-
 
     if ranked_candidates:
         # Save results

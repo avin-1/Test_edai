@@ -12,3 +12,4 @@ langchain-core
 langchain-openai
 Flask
 fpdf2
+Flask-Cors

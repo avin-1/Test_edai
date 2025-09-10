@@ -1,6 +1,8 @@
 import os
 import sys
-from flask import Flask, render_template, request, redirect, url_for, flash
+import uuid
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from fpdf import FPDF
 import database as db
@@ -18,168 +20,128 @@ from interviewSchedulingAgent.main import schedule_interview
 from feedbackAgent.main import log_feedback
 
 app = Flask(__name__)
+CORS(app) # Enable CORS for all routes
 
 # --- Configuration ---
 JD_INPUT_DIR = os.path.join('agents', 'JobDescriptionParsingAgent', 'Input')
 RESUME_INPUT_DIR = os.path.join('agents', 'resumeParsingAgent', 'input')
 ALLOWED_EXTENSIONS = {'pdf'}
-app.config['SECRET_KEY'] = 'a_secure_random_secret_key_for_mvp'
 
-# --- Initialize Database ---
 db.init_db()
 
 # --- Helper ---
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# --- Flask Routes ---
+# --- API Routes ---
 
-import datetime
-
-@app.route('/')
-def index():
-    """Main dashboard, shows a list of all jobs."""
+@app.route('/api/jobs', methods=['GET'])
+def get_jobs():
+    """API endpoint to get a list of all jobs."""
     all_jobs = db.get_all_jobs()
-    # Format the timestamp for display
-    for job in all_jobs:
-        job['created_at_formatted'] = datetime.datetime.fromtimestamp(job['created_at']).strftime('%Y-%m-%d %H:%M')
-    return render_template('index.html', title='HR Dashboard', jobs=all_jobs)
+    return jsonify(all_jobs)
 
-@app.route('/job/<job_id>')
-def job_view(job_id):
-    """Displays the details for a single job, including candidates and shortlist."""
+@app.route('/api/job/<job_id>', methods=['GET'])
+def get_job_details(job_id):
+    """API endpoint to get details for a single job."""
     job_data = db.get_job(job_id)
     if not job_data:
-        flash(f"Job with ID {job_id} not found.", 'error')
-        return redirect(url_for('index'))
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify(job_data)
 
-    return render_template('job_view.html', title=job_data['job_profile'].get('job_title', 'Job Details'), job=job_data, job_id=job_id)
+@app.route('/api/jobs', methods=['POST'])
+def create_new_job():
+    """API endpoint to create a new job."""
+    jd_text = request.json.get('jd_text')
+    if not jd_text:
+        return jsonify({"error": "jd_text is required"}), 400
 
-@app.route('/add_job', methods=['GET', 'POST'])
-def add_job():
-    """Handles creating a new job."""
-    if request.method == 'POST':
-        jd_text = request.form['jd_text']
-        if not jd_text:
-            flash('Job Description text cannot be empty.', 'error')
-            return redirect(request.url)
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.multi_cell(0, 10, txt=jd_text.encode('latin-1', 'replace').decode('latin-1'))
+    pdf_path = os.path.join(JD_INPUT_DIR, f"jd_{uuid.uuid4()}.pdf")
+    pdf.output(pdf_path)
 
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        pdf.multi_cell(0, 10, txt=jd_text.encode('latin-1', 'replace').decode('latin-1'))
-        pdf_path = os.path.join(JD_INPUT_DIR, f"jd_{uuid.uuid4()}.pdf")
-        pdf.output(pdf_path)
+    parsed_job_data = process_job_description(pdf_path)
+    if parsed_job_data:
+        job_id = db.create_job(parsed_job_data)
+        new_job = db.get_job(job_id)
+        return jsonify({"message": "Job created successfully", "job": new_job}), 201
+    else:
+        return jsonify({"error": "Failed to parse job description"}), 500
 
-        parsed_job_data = process_job_description(pdf_path)
-        if parsed_job_data:
-            job_id = db.create_job(parsed_job_data)
-            flash(f"New job '{parsed_job_data.get('job_title')}' created.", 'success')
-            return redirect(url_for('job_view', job_id=job_id))
-        else:
-            flash('Failed to parse the provided job description.', 'error')
-            return redirect(request.url)
+@app.route('/api/job/<job_id>/resumes', methods=['POST'])
+def upload_job_resumes(job_id):
+    """API endpoint to upload resumes for a specific job."""
+    if 'resumes' not in request.files:
+        return jsonify({"error": "No files part in the request"}), 400
 
-    return render_template('add_job.html', title='Add New Job')
+    files = request.files.getlist('resumes')
+    if not files or files[0].filename == '':
+        return jsonify({"error": "No selected files"}), 400
 
-@app.route('/job/<job_id>/upload_resumes', methods=['GET', 'POST'])
-def upload_resumes(job_id):
-    """Handles uploading resumes for a specific job."""
+    parsed_count = 0
+    for file in files:
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            save_path = os.path.join(RESUME_INPUT_DIR, filename)
+            file.save(save_path)
+
+            raw_data = run_local_resume_parsing(save_path)
+            if raw_data:
+                refined_data = run_llm_resume_refinement(raw_data)
+                if refined_data:
+                    refined_data['original_filename'] = filename
+                    db.add_candidate(job_id, refined_data)
+                    parsed_count += 1
+
+    return jsonify({"message": f"Successfully parsed and added {parsed_count} new resumes."}), 200
+
+@app.route('/api/job/<job_id>/run_pipeline', methods=['POST'])
+def run_job_pipeline(job_id):
+    """API endpoint to run the full pipeline for a job."""
     job_data = db.get_job(job_id)
     if not job_data:
-        flash('Job not found.', 'error')
-        return redirect(url_for('index'))
-
-    if request.method == 'POST':
-        files = request.files.getlist('resumes')
-        if not files or files[0].filename == '':
-            flash('No selected files.', 'error')
-            return redirect(request.url)
-
-        parsed_count = 0
-        for file in files:
-            if file and allowed_file(file.filename):
-                filename = secure_filename(file.filename)
-                save_path = os.path.join(RESUME_INPUT_DIR, filename)
-                file.save(save_path)
-
-                raw_data = run_local_resume_parsing(save_path)
-                if raw_data:
-                    refined_data = run_llm_resume_refinement(raw_data)
-                    if refined_data:
-                        refined_data['original_filename'] = filename
-                        db.add_candidate(job_id, refined_data)
-                        parsed_count += 1
-
-        flash(f'Successfully parsed and added {parsed_count} new resumes.', 'success')
-        return redirect(url_for('job_view', job_id=job_id))
-
-    return render_template('upload_resumes.html', title='Upload Resumes', job=job_data, job_id=job_id)
-
-@app.route('/job/<job_id>/run_pipeline', methods=['POST'])
-def run_pipeline(job_id):
-    """Runs the full matching and shortlisting pipeline for a job."""
-    job_data = db.get_job(job_id)
-    if not job_data:
-        flash('Job not found.', 'error')
-        return redirect(url_for('index'))
+        return jsonify({"error": "Job not found"}), 404
 
     candidates = db.get_candidates_for_job(job_id)
     if not candidates:
-        flash('No candidates for this job. Please upload resumes first.', 'error')
-        return redirect(url_for('job_view', job_id=job_id))
+        return jsonify({"error": "No candidates for this job"}), 400
 
     ranked_list = run_matching_pipeline(job_data['job_profile'], candidates)
     final_shortlist = run_shortlisting_pipeline(ranked_list)
     db.save_shortlist(job_id, final_shortlist)
 
-    flash(f"Pipeline complete! {len(final_shortlist)} candidates were shortlisted.", 'success')
-    return redirect(url_for('job_view', job_id=job_id))
+    return jsonify({"message": "Pipeline complete", "shortlist": final_shortlist}), 200
 
-@app.route('/job/<job_id>/schedule/<int:candidate_index>', methods=['POST'])
-def schedule(job_id, candidate_index):
-    """Schedules an interview."""
+@app.route('/api/job/<job_id>/schedule/<int:candidate_index>', methods=['POST'])
+def schedule_api(job_id, candidate_index):
+    """API endpoint for scheduling."""
     shortlist = db.get_shortlist(job_id)
     job_data = db.get_job(job_id)
-
     if candidate_index >= len(shortlist):
-        flash('Invalid candidate.', 'error')
-        return redirect(url_for('job_view', job_id=job_id))
+        return jsonify({"error": "Invalid candidate index"}), 400
 
     candidate = shortlist[candidate_index]
-    candidate_name = candidate.get('candidate_name', 'N/A')
-    candidate_email = candidate.get('contact_info', {}).get('email', 'email_not_found')
-    job_title = job_data['job_profile'].get('job_title', 'N/A')
-
-    if schedule_interview(candidate_name, candidate_email, job_title):
-        flash(f"Interview scheduled with {candidate_name}.", 'success')
+    if schedule_interview(candidate.get('candidate_name'), candidate.get('contact_info', {}).get('email'), job_data['job_profile'].get('job_title')):
+        return jsonify({"message": f"Interview scheduled with {candidate.get('candidate_name')}"}), 200
     else:
-        flash(f"Failed to schedule interview.", 'error')
+        return jsonify({"error": "Failed to schedule interview"}), 500
 
-    return redirect(url_for('job_view', job_id=job_id))
-
-@app.route('/job/<job_id>/feedback/<int:candidate_index>/<feedback_type>', methods=['POST'])
-def feedback(job_id, candidate_index, feedback_type):
-    """Logs feedback for a candidate."""
+@app.route('/api/job/<job_id>/feedback/<int:candidate_index>/<feedback_type>', methods=['POST'])
+def feedback_api(job_id, candidate_index, feedback_type):
+    """API endpoint for logging feedback."""
     shortlist = db.get_shortlist(job_id)
     job_data = db.get_job(job_id)
-
     if feedback_type not in ['positive', 'negative'] or candidate_index >= len(shortlist):
-        flash('Invalid request.', 'error')
-        return redirect(url_for('job_view', job_id=job_id))
+        return jsonify({"error": "Invalid request"}), 400
 
     candidate = shortlist[candidate_index]
-    candidate_name = candidate.get('candidate_name', 'N/A')
-    job_title = job_data['job_profile'].get('job_title', 'N/A')
-
-    if log_feedback(candidate_name, job_title, feedback_type):
-        flash(f"Feedback logged for {candidate_name}.", 'success')
+    if log_feedback(candidate.get('candidate_name'), job_data['job_profile'].get('job_title'), feedback_type):
+        return jsonify({"message": f"Feedback logged for {candidate.get('candidate_name')}"}), 200
     else:
-        flash('Failed to log feedback.', 'error')
-
-    return redirect(url_for('job_view', job_id=job_id))
+        return jsonify({"error": "Failed to log feedback"}), 500
 
 if __name__ == '__main__':
-    # Need to import uuid for the pdf name
-    import uuid
     app.run(debug=True, host='0.0.0.0', port=8080)
