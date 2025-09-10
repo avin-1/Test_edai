@@ -92,6 +92,7 @@ def calculate_keyword_match_score(job_skills, candidate_skills):
 
     return len(intersection) / len(union) if union else 0.0
 
+
 def calculate_semantic_match_score(job_desc, candidate_exp):
     """
     Calculates a semantic match score using sentence embeddings.
@@ -103,8 +104,13 @@ def calculate_semantic_match_score(job_desc, candidate_exp):
     # Join lists of strings into single documents
     job_doc = " ".join(job_desc)
 
-    # Candidate experience is a list of dicts, filter out empty ones
-    candidate_docs = [" ".join(exp.get('responsibilities', [])) for exp in candidate_exp if exp.get('responsibilities')]
+    # Candidate experience is a list of dicts or strings, filter out empty ones
+    candidate_docs = []
+    for exp in candidate_exp:
+        if isinstance(exp, dict) and exp.get('responsibilities'):
+            candidate_docs.append(" ".join(exp.get('responsibilities')))
+        elif isinstance(exp, str) and exp.strip():
+            candidate_docs.append(exp)
 
     if not candidate_docs:
         return 0.0
@@ -121,7 +127,6 @@ def calculate_semantic_match_score(job_desc, candidate_exp):
         return torch.max(cosine_scores).item()
     else:
         return 0.0
-
 
 # --- Main Orchestration ---
 

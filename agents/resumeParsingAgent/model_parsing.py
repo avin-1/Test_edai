@@ -5,9 +5,13 @@ import re
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Get the directory of the current script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # --- Configuration ---
-RAW_JSON_FOLDER = "output"  # Assuming your parser saves raw JSON here
-FINAL_OUTPUT_FOLDER = "model_output"  # Folder to save the final refined JSON
+RAW_JSON_FOLDER = os.path.join(SCRIPT_DIR, "output")
+FINAL_OUTPUT_FOLDER = os.path.join(SCRIPT_DIR, "model_output")
 
 # Ensure output directory exists
 os.makedirs(FINAL_OUTPUT_FOLDER, exist_ok=True)
@@ -120,23 +124,13 @@ def refine_resume_json_with_llm(input_file_path):
                     "content": prompt
                 }
             ],
-            temperature=0.0
+            temperature=0.0,
+            response_format={"type": "json_object"}
         )
         
+        # With response_format, the response content is guaranteed to be a valid JSON string.
         response_text = completion.choices[0].message.content
-        
-        # Clean up the output to ensure it's valid JSON
-        # Look for a JSON block within the response
-        json_match = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL)
-        if json_match:
-            json_str = json_match.group(1)
-        else:
-            json_str = response_text
-        
-        json_str = json_str.strip()
-        
-        # The LLM should only output JSON, so we try to parse directly.
-        refined_data = json.loads(json_str)
+        refined_data = json.loads(response_text)
 
         # Save the refined JSON to the final output folder
         output_file_name = os.path.basename(input_file_path).replace(".json", "_structured.json")
@@ -146,11 +140,9 @@ def refine_resume_json_with_llm(input_file_path):
         
         print(f"Refined JSON saved to {output_file_path}")
 
-    except json.JSONDecodeError as e:
-        print(f"LLM produced invalid JSON: {e}")
-        print("Raw LLM output:\n", response_text)
     except Exception as e:
         print(f"An unexpected error occurred during LLM processing: {e}")
+        # The json.loads error should be prevented by response_format, but other API errors can still occur.
 
 # --- Main execution loop ---
 if __name__ == "__main__":
