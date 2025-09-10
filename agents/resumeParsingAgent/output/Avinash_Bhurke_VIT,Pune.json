@@ -1,0 +1,32 @@
+{
+  "title": "Avinash Madhav Bhurke",
+  "personal_info": {
+    "name": "Avinash Madhav Bhurke",
+    "email": null,
+    "phone": null,
+    "raw_text": "Avinash Madhav Bhurke"
+  },
+  "experience": [
+    ""
+  ],
+  "education": [
+    ""
+  ],
+  "skills": [
+    ""
+  ],
+  "other": {
+    "avinashbhurke8@gmail.com  |    +91 9075807884": "Skills GitHub:  https://github.com/avin-1  | LinkedIn:  www.linkedin.com/in/avinash-bhurke",
+    "Languages:  Python, C++, C, Java, JavaScript, TypeScript": "",
+    "Project Work": "•  Semantic Document Intelligence  ( Link ): Designed an offline semantic analysis pipeline for structured PDF extraction and contextual relevance ranking in the domain of Document AI and Information Retrieval. Implemented heading- based section parsing with semantic embeddings (all-mpnet-base-v2), cosine similarity ranking, and TF-IDF keyword extraction for refined summaries. Optimized for CPU-only environments, achieving sub-60s processing of multiple doc- uments while ensuring complete data privacy. •  RAG Insurance Query Processor : Developed a full-stack Retrieval-Augmented Generation (RAG) system to answer natural-language insurance queries against uploaded policy documents. Built multilingual NLP and Question Answer- ing capabilities with document ingestion (OCR fallback), FAISS-based vector search, and Gemini LLM for structured intent parsing. Integrated JSON-based decision generation with justification and source clauses. Built React frontend for file uploads, query submission, and results visualization •  Voice Over Generation Bot:  Commentary Bot with API Integration – Developed a Python-based tool to generate voiceover scripts from video frames using OpenAI and Gemini APIs. Applied Computer Vision and Video Processing (OpenCV) with text-to-speech (gTTS), automating speech synthesis and commentary generation for 100+ frames.",
+    "DSC | AIML-Team Member": "",
+    "•  Conducted research on integrating Convolutional Neural Networks (CNNs) with hybrid neural networks, contributing to": "team whitepapers. •  Explored applications in Deep Learning, Computer Vision, and AI-driven automation. •  Organized speaker sessions, boosting attendance by 15% through effective publicity efforts.",
+    "EPEC | Outreach and Publicity Volunteer": "•  Supported publicity for college Techfest, increasing attendance by 20% via social media campaigns. •  Recruited 50+ participants for the tech festival, increasing the visibility of the event by 15%.",
+    "CGPA: 8.63/10": "",
+    "Blue Bells Jr. College, India | Class XII": "",
+    "Universal English Medium School, India | Class X": "",
+    "Awards and Certificates": "",
+    "•  Introduction to DevOps Certificate by IBM  (Link)": "",
+    "•  2x Scopus Indexed Research Papers Published": "at IEEE International Conference (DICCT-2025), Graphic Era University, Dehradun  (Link) •  Ranked  482 out of 5,000 students  in GeeksforGeeks Institute Coding Leaderboard"
+  }
+}

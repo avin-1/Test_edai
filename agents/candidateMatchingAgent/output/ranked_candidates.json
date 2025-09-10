@@ -1,9 +1,16 @@
 [
     {
+        "candidate_name": "Avinash Madhav Bhurke",
+        "original_filename": "Avinash_Bhurke_VIT,Pune_structured.json",
+        "keyword_match_score": 0.0,
+        "semantic_match_score": 0.13,
+        "final_match_score": 0.08
+    },
+    {
         "candidate_name": "Your Name",
         "original_filename": "EDAI_CV_structured.json",
         "keyword_match_score": 0.0,
-        "semantic_match_score": 0.12,
-        "final_match_score": 0.07
+        "semantic_match_score": 0.03,
+        "final_match_score": 0.02
     }
 ]

@@ -5,9 +5,13 @@ import re
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Get the directory of the current script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # --- Configuration ---
-RAW_JSON_FOLDER = "output"  # Assuming your parser saves raw JSON here
-FINAL_OUTPUT_FOLDER = "model_output"  # Folder to save the final refined JSON
+RAW_JSON_FOLDER = os.path.join(SCRIPT_DIR, "output")
+FINAL_OUTPUT_FOLDER = os.path.join(SCRIPT_DIR, "model_output")
 
 # Ensure output directory exists
 os.makedirs(FINAL_OUTPUT_FOLDER, exist_ok=True)
