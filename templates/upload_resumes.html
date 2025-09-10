@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        h1 { color: #333; }
+        form { margin-top: 20px; }
+        input[type="file"] { display: block; margin-bottom: 10px; }
+        button { margin-top: 10px; padding: 10px 20px; }
+    </style>
+</head>
+<body>
+    <h1>Upload Resumes for: {{ job['job_profile'].get('job_title', 'N/A') }}</h1>
+    <p>Select one or more PDF resume files to upload and process.</p>
+    <form action="{{ url_for('upload_resumes', job_id=job_id) }}" method="post" enctype="multipart/form-data">
+        <input type="file" name="resumes" multiple required>
+        <button type="submit">Upload Resumes</button>
+    </form>
+    <a href="{{ url_for('job_view', job_id=job_id) }}">Back to Job Details</a>
+</body>
+</html>

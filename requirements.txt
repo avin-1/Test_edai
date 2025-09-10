@@ -10,3 +10,5 @@ langchain
 langchain-community
 langchain-core
 langchain-openai
+Flask
+fpdf2

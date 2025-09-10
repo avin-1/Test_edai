@@ -13,144 +13,95 @@ FINAL_OUTPUT_FOLDER = "model_output"  # Folder to save the final refined JSON
 os.makedirs(FINAL_OUTPUT_FOLDER, exist_ok=True)
 
 # --- OpenAI Client Initialization ---
-# The client setup you provided
-client = OpenAI(
-    base_url="https://router.huggingface.co/v1",
-    api_key=os.environ["HF_TOKEN"],
-)
+client = None
+if os.environ.get("HF_TOKEN"):
+    client = OpenAI(
+        base_url="https://router.huggingface.co/v1",
+        api_key=os.environ["HF_TOKEN"],
+    )
 
 # --- Main Refinement Function ---
-def refine_resume_json_with_llm(input_file_path):
+def run_llm_resume_refinement(raw_data):
     """
-    Reads an inconsistent JSON file and uses a generative LLM to structure it.
+    Takes semi-structured resume data and uses an LLM to refine it.
+    Returns the final, structured candidate data.
     """
-    try:
-        with open(input_file_path, 'r', encoding='utf-8') as f:
-            raw_data = json.load(f)
-    except FileNotFoundError:
-        print(f"File not found: {input_file_path}")
-        return
-    except json.JSONDecodeError:
-        print(f"Error decoding JSON from file: {input_file_path}")
-        return
+    if not client:
+        print("LLM client not initialized. Cannot refine resume data.")
+        # Return the raw data so the pipeline can continue with non-LLM data
+        return raw_data
+    if not raw_data:
+        print("No raw data provided for LLM refinement.")
+        return None
 
-    # A better, more comprehensive prompt to handle the inconsistencies
     prompt = f"""
     You are an expert resume parser. You are given an inconsistent JSON file extracted from a resume. 
     Your task is to correct the data, identify the correct key-value pairs, and produce a clean, structured JSON output.
-
-    The input JSON has several problems:
-    - Many keys are actually values (e.g., "CGPA: 8.63" is a key with an empty string as a value).
-    - Content is split across multiple keys and sections.
-    - Some keys are simply numbers or dates.
-    - The content is not granular (e.g., job titles and companies are in a single string).
-    
-    You must use your knowledge to infer the correct structure and relationships.
-
     Target Schema:
-    ```json
     {{
-      "candidate_name": string,
-      "contact_info": {{
-        "email": string,
-        "phone": string,
-        "linkedin_url": string
-      }},
-      "summary": string,
-      "experience": [
-        {{
-          "job_title": string,
-          "company_name": string,
-          "start_date": string,
-          "end_date": string,
-          "responsibilities": [string]
-        }}
-      ],
-      "education": [
-        {{
-          "degree": string,
-          "institution": string,
-          "start_date": string,
-          "end_date": string,
-          "gpa": string
-        }}
-      ],
-      "skills": {{
-        "languages": [string],
-        "frameworks_tools": [string],
-        "databases": [string],
-        "ai_ml": [string],
-        "cloud_devops": [string]
-      }},
-      "projects": [
-        {{
-          "project_name": string,
-          "year": string,
-          "description": string
-        }}
-      ],
-      "awards_honors": [string],
-      "publications": [string]
+      "candidate_name": string, "contact_info": {{"email": string, "phone": string, "linkedin_url": string}},
+      "summary": string, "experience": [{{"job_title": string, "company_name": string, "start_date": string, "end_date": string, "responsibilities": [string]}}],
+      "education": [{{"degree": string, "institution": string, "start_date": string, "end_date": string, "gpa": string}}],
+      "skills": {{"languages": [string], "frameworks_tools": [string], "databases": [string], "ai_ml": [string], "cloud_devops": [string]}},
+      "projects": [{{"project_name": string, "year": string, "description": string}}],
+      "awards_honors": [string], "publications": [string]
     }}
-    ```
-
     Input JSON to Correct:
-    ```json
     {json.dumps(raw_data, indent=2)}
-    ```
-
     Follow these rules:
-    1.  **Extract and Consolidate**: Find all relevant information (e.g., "CGPA," "B.Tech") from across all sections, including the `categorized_sections` and `experience`/`education`/`skills` arrays.
-    2.  **Granularize**: Break down long strings into distinct fields like `job_title`, `company_name`, `start_date`, and `end_date`.
-    3.  **Use Lists**: For skills, split comma-separated or bullet-pointed lists into arrays of strings.
-    4.  **Infer and Structure**: Based on the context, correctly place each piece of data under the appropriate key in the target schema.
-    5.  **Strict Output**: Produce ONLY the final JSON object. Do not include any additional text, markdown, or comments before or after the JSON. The JSON must be perfectly valid.
-    
-    Begin your response with the JSON object.
+    1. Extract and Consolidate: Find all relevant information.
+    2. Granularize: Break down long strings into distinct fields.
+    3. Use Lists: Split comma-separated or bullet-pointed lists into arrays.
+    4. Infer and Structure: Correctly place each piece of data under the appropriate key.
+    5. Strict Output: Produce ONLY the final JSON object. Do not include any additional text, markdown, or comments.
     """
 
-    print(f"Processing {os.path.basename(input_file_path)}...")
+    print("  - Sending data to LLM for refinement...")
 
     try:
         completion = client.chat.completions.create(
             model="openai/gpt-oss-20b:fireworks-ai",
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
+            messages=[{"role": "user", "content": prompt}],
             temperature=0.0
         )
-        
         response_text = completion.choices[0].message.content
         
-        # Clean up the output to ensure it's valid JSON
-        # Look for a JSON block within the response
         json_match = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL)
-        if json_match:
-            json_str = json_match.group(1)
-        else:
-            json_str = response_text
-        
+        json_str = json_match.group(1) if json_match else response_text
         json_str = json_str.strip()
         
-        # The LLM should only output JSON, so we try to parse directly.
         refined_data = json.loads(json_str)
-
-        # Save the refined JSON to the final output folder
-        output_file_name = os.path.basename(input_file_path).replace(".json", "_structured.json")
-        output_file_path = os.path.join(FINAL_OUTPUT_FOLDER, output_file_name)
-        with open(output_file_path, 'w', encoding='utf-8') as f:
-            json.dump(refined_data, f, indent=2, ensure_ascii=False)
-        
-        print(f"Refined JSON saved to {output_file_path}")
+        print("  - LLM refinement successful.")
+        return refined_data
 
     except json.JSONDecodeError as e:
         print(f"LLM produced invalid JSON: {e}")
         print("Raw LLM output:\n", response_text)
+        return None
     except Exception as e:
         print(f"An unexpected error occurred during LLM processing: {e}")
+        return None
+
+
+def refine_resume_json_with_llm_from_file(input_file_path):
+    """
+    Original function to read from a file, for standalone use.
+    """
+    try:
+        with open(input_file_path, 'r', encoding='utf-8') as f:
+            raw_data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"Error reading or parsing file {input_file_path}: {e}")
+        return
+
+    refined_data = run_llm_resume_refinement(raw_data)
+
+    if refined_data:
+        output_file_name = os.path.basename(input_file_path).replace(".json", "_structured.json")
+        output_file_path = os.path.join(FINAL_OUTPUT_FOLDER, output_file_name)
+        with open(output_file_path, 'w', encoding='utf-8') as f:
+            json.dump(refined_data, f, indent=2, ensure_ascii=False)
+        print(f"Refined JSON saved to {output_file_path}")
 
 # --- Main execution loop ---
 if __name__ == "__main__":

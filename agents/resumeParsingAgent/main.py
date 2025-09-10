@@ -329,131 +329,104 @@ def extract_personal_info(text):
     }
 
 
+def run_local_resume_parsing(file_path):
+    """
+    Parses a resume PDF locally without using an LLM.
+    This function encapsulates the original parsing logic.
+    Returns the extracted, semi-structured candidate data.
+    """
+    doc = None
+    try:
+        doc = fitz.open(file_path)
+    except Exception as e:
+        print(f"Error opening PDF {file_path}: {e}")
+        return None
+
+    try:
+        doc_structure = get_document_structure(doc)
+        if not doc_structure:
+            print("No text found in the document.")
+            return None
+
+        result = extract_pdf_outline(doc_structure, CONFIG)
+        if "error" in result:
+            print(f"Skipping file due to parsing error: {result['error']}")
+            return None
+
+        title = result.get("title", "")
+        headings = result.get('outline', [])
+        candidate_profile = {
+            "title": title, "personal_info": {}, "experience": [],
+            "education": [], "skills": [], "other": {}
+        }
+
+        if doc_structure and doc_structure[0]['blocks']:
+            first_block_text = " ".join([line['text'] for line in doc_structure[0]['blocks'][0]['lines']])
+            candidate_profile["personal_info"] = extract_personal_info(first_block_text)
+
+        if headings:
+            end_of_doc_bbox = (0, doc_structure[-1]['page_height'], doc_structure[-1]['page_width'], doc_structure[-1]['page_height'])
+            headings.append({"text": "End of Document", "page": len(doc_structure), "bbox": end_of_doc_bbox})
+            for i in range(len(headings) - 1):
+                h1, h2 = headings[i], headings[i+1]
+                content_text = get_content_between_headings(doc_structure, h1['page'], h1['bbox'], h2['page'], h2['bbox'])
+                heading_category = classify_heading(h1['text'])
+                if heading_category == 'education':
+                    candidate_profile['education'].append(content_text.strip())
+                elif heading_category == 'experience':
+                    candidate_profile['experience'].append(content_text.strip())
+                elif heading_category == 'skills':
+                    candidate_profile['skills'].append(content_text.strip())
+                else:
+                    candidate_profile['other'][h1['text']] = content_text.strip()
+
+        return candidate_profile
+
+    except Exception as e:
+        print(f"Error processing {file_path}: {e}")
+        return None
+    finally:
+        if doc:
+            doc.close()
+
+
 class ResumeProcessor(FileSystemEventHandler):
     def on_created(self, event):
         if not event.is_directory and event.src_path.endswith(".pdf"):
             print(f"\n--- New resume detected: {event.src_path} ---")
-            self.process_resume(event.src_path)
+            self.process_resume_file_based(event.src_path)
 
-    def process_resume(self, file_path):
-        # --- MODIFIED: Retry logic for file access ---
-        max_retries = 10
-        retry_delay_seconds = 0.5
-        doc = None
-        for i in range(max_retries):
-            try:
-                doc = fitz.open(file_path)
-                break
-            except Exception as e:
-                print(f"Attempt {i+1}/{max_retries}: Failed to open file. Retrying in {retry_delay_seconds}s. Error: {e}")
-                time.sleep(retry_delay_seconds)
+    def process_resume_file_based(self, file_path):
+        """
+        Original file-based processing method. It now calls the local parser
+        and then saves the output, before triggering the model parsing script.
+        """
+        candidate_profile = run_local_resume_parsing(file_path)
 
-        if doc is None:
-            print(f"Skipping file due to persistent parsing error: Could not open or read PDF file after {max_retries} attempts.")
+        if not candidate_profile:
+            print(f"Failed to parse {file_path} locally. Skipping.")
             return
-        # --- END OF MODIFIED CODE ---
 
-        try:
-            start_time = time.time()
-            
-            # --- MODIFIED: Passing the document object to the next function ---
-            doc_structure = get_document_structure(doc)
-            
-            if not doc_structure:
-                print("No text found in the document.")
-                return
+        filename = os.path.basename(file_path)
+        output_filename = os.path.splitext(filename)[0] + ".json"
+        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+        save_json(candidate_profile, output_path)
+        print(f"Locally parsed profile saved to {output_path}")
 
-            result = extract_pdf_outline(doc_structure, CONFIG)
+        # This part now calls the LLM refinement function directly
+        from .model_parsing import run_llm_resume_refinement, FINAL_OUTPUT_FOLDER
 
-            if "error" in result:
-                print(f"Skipping file due to parsing error: {result['error']}")
-                return
+        print("Calling LLM for refinement...")
+        refined_data = run_llm_resume_refinement(candidate_profile)
 
-            title = result.get("title", "")
-            headings = result.get('outline', [])
-
-            candidate_profile = {
-                "title": title,
-                "personal_info": {},
-                "experience": [],
-                "education": [],
-                "skills": [],
-                "other": {}
-            }
-
-            if doc_structure:
-                first_block_text = " ".join(
-                    [line['text'] for line in doc_structure[0]['blocks'][0]['lines']]
-                )
-                candidate_profile["personal_info"] = extract_personal_info(first_block_text)
-
-            if headings:
-                end_of_doc_bbox = (
-                    0,
-                    doc_structure[-1]['page_height'],
-                    doc_structure[-1]['page_width'],
-                    doc_structure[-1]['page_height']
-                )
-                headings.append({
-                    "text": "End of Document",
-                    "page": len(doc_structure),
-                    "bbox": end_of_doc_bbox
-                })
-
-                for i in range(len(headings) - 1):
-                    h1, h2 = headings[i], headings[i+1]
-                    content_text = get_content_between_headings(
-                        doc_structure, h1['page'], h1['bbox'], h2['page'], h2['bbox']
-                    )
-                    heading_category = classify_heading(h1['text'])
-
-                    if heading_category == 'education':
-                        candidate_profile['education'].append(content_text.strip())
-                    elif heading_category == 'experience':
-                        candidate_profile['experience'].append(content_text.strip())
-                    elif heading_category == 'skills':
-                        candidate_profile['skills'].append(content_text.strip())
-                    else:
-                        candidate_profile['other'][h1['text']] = content_text.strip()
-
-            elapsed = time.time() - start_time
-            print(f"Time taken to parse: {elapsed:.2f} seconds")
-
-            filename = os.path.basename(file_path)
-            output_filename = os.path.splitext(filename)[0] + ".json"
-            output_path = os.path.join(OUTPUT_FOLDER, output_filename)
-            save_json(candidate_profile, output_path)
-            print(f"Candidate profile saved to {output_path}")
-
-            model_script_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), 'model_parsing.py'
-            )
-
-            if os.path.exists(model_script_path):
-                print(f"Calling model script: {model_script_path}")
-                try:
-                    # Use the sys.executable path to ensure the correct Python interpreter is used
-                    subprocess.run(
-                        [sys.executable, model_script_path],
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                        env=os.environ.copy()
-                    )
-                    print("model_parsing.py executed successfully.")
-                except subprocess.CalledProcessError as e:
-                    print(f"Error running model_parsing.py: {e.stderr}")
-                except FileNotFoundError:
-                    print(f"Python executable not found at '{sys.executable}'.")
-            else:
-                print(f"model_parsing.py not found at {model_script_path}. Skipping.")
-
-        except Exception as e:
-            print(f"Error processing {file_path}: {e}")
-        finally:
-            # Ensure the document is always closed
-            if doc:
-                doc.close()
+        if refined_data:
+            # Save the final, structured data
+            structured_output_filename = os.path.splitext(filename)[0] + "_structured.json"
+            structured_output_path = os.path.join(FINAL_OUTPUT_FOLDER, structured_output_filename)
+            save_json(refined_data, structured_output_path)
+            print(f"LLM-refined profile saved to {structured_output_path}")
+        else:
+            print("LLM refinement failed. The locally parsed file is still available.")
 
 
 if __name__ == "__main__":
