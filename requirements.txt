@@ -1,0 +1,12 @@
+PyMuPDF
+watchdog
+openai
+python-dotenv
+scikit-learn
+sentence-transformers
+numpy
+langgraph
+langchain
+langchain-community
+langchain-core
+langchain-openai
