@@ -124,56 +124,32 @@ def calculate_semantic_match_score(job_desc, candidate_exp):
 
 # --- Main Orchestration ---
 
-def main():
+def run_matching_pipeline(job_profile, candidate_profiles):
     """
-    Main function to orchestrate the candidate matching process.
+    Runs the candidate matching process on the given data.
+    Accepts data as arguments and returns the ranked list.
     """
-    print("Starting Candidate Matching Agent...")
+    print("Running candidate matching pipeline...")
+    if not job_profile or not candidate_profiles:
+        print("Missing job profile or candidate profiles.")
+        return []
 
-    # Define dynamic weights based on job role
-    WEIGHTS = {
-        "Data Entry Clerk": {"keyword": 0.7, "semantic": 0.3},
-        "Senior Software Engineer": {"keyword": 0.3, "semantic": 0.7},
-        "default": {"keyword": 0.4, "semantic": 0.6}
-    }
-    
-    # 1. Load data
-    job_profile = get_job_profile()
-    if not job_profile:
-        print("Could not load job profile. Exiting.")
-        return
-
-    candidate_profiles = get_candidate_profiles()
-    if not candidate_profiles:
-        print("No candidate profiles found. Exiting.")
-        return
-
-    job_title = job_profile.get('job_title', 'N/A')
-    print(f"Loaded job profile: {job_title}")
-    print(f"Loaded {len(candidate_profiles)} candidate profiles.")
-
-    # Select weights based on job title, defaulting if not found
-    selected_weights = WEIGHTS.get(job_title, WEIGHTS["default"])
-    
-    # 2. Process each candidate
     results = []
     job_skills = job_profile.get('required_skills', [])
     job_responsibilities = job_profile.get('responsibilities', [])
 
     for candidate in candidate_profiles:
         candidate_name = candidate.get('candidate_name', 'Unknown Candidate')
-        print(f"\nProcessing candidate: {candidate_name}...")
+        print(f"  - Matching candidate: {candidate_name}")
 
-        # Get candidate data
         candidate_skills = candidate.get('skills', {})
         candidate_experience = candidate.get('experience', [])
 
-        # Calculate scores
         keyword_score = calculate_keyword_match_score(job_skills, candidate_skills)
         semantic_score = calculate_semantic_match_score(job_responsibilities, candidate_experience)
+        
+        final_score = (0.4 * keyword_score) + (0.6 * semantic_score)
 
-        # Combine scores with dynamic weights
-        final_score = (selected_weights["keyword"] * keyword_score) + (selected_weights["semantic"] * semantic_score)
 
         results.append({
             "candidate_name": candidate_name,
@@ -182,29 +158,29 @@ def main():
             "semantic_match_score": round(semantic_score, 2),
             "final_match_score": round(final_score, 2)
         })
-        print(f"  - Keyword Score: {keyword_score:.2f}")
-        print(f"  - Semantic Score: {semantic_score:.2f}")
-        print(f"  - Final Score: {final_score:.2f}")
 
-    # 3. Rank candidates
     ranked_candidates = sorted(results, key=lambda x: x['final_match_score'], reverse=True)
+    print(f"Successfully ranked {len(ranked_candidates)} candidates.")
+    return ranked_candidates
 
-    # 4. Save results
-    output_filename = os.path.join(OUTPUT_DIR, "ranked_candidates.json")
-    with open(output_filename, 'w', encoding='utf-8') as f:
-        json.dump(ranked_candidates, f, indent=4)
+def main_file_based():
+    """
+    Original main function for running the agent from files.
+    Kept for testing or standalone use.
+    """
+    print("Starting Candidate Matching Agent (File-based)...")
+    job_profile = get_job_profile()
+    candidate_profiles = get_candidate_profiles()
 
-    print(f"\nSuccessfully ranked {len(ranked_candidates)} candidates.")
-    print(f"Results saved to {output_filename}")
+    ranked_candidates = run_matching_pipeline(job_profile, candidate_profiles)
+
+
+    if ranked_candidates:
+        # Save results
+        output_filename = os.path.join(OUTPUT_DIR, "ranked_candidates.json")
+        with open(output_filename, 'w', encoding='utf-8') as f:
+            json.dump(ranked_candidates, f, indent=4)
+        print(f"Results saved to {output_filename}")
 
 if __name__ == "__main__":
-    # A quick check for torch, as it was problematic
-    try:
-        import torch
-        print(f"PyTorch version: {torch.__version__}")
-    except ImportError as e:
-        print(f"PyTorch import error: {e}. Semantic matching will be affected.")
-        # The script will still run but semantic scores will be placeholders.
-
-    main()
-##improved matching system 
+    main_file_based()

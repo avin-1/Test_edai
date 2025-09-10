@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f4f9; }
+        h1, h2, h3 { color: #333; }
+        .container { max-width: 1200px; margin: auto; }
+        .controls { margin-bottom: 20px; padding: 15px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .button { padding: 10px 15px; color: white; text-decoration: none; border-radius: 5px; margin-right: 10px; background-color: #007BFF; display: inline-block;}
+        .button.green { background-color: #28a745; }
+        .button.orange { background-color: #fd7e14; border: none; font-size: 1em; cursor: pointer; font-family: Arial, sans-serif;}
+        .flashes { list-style: none; padding: 0; }
+        .flash { padding: 10px; margin-bottom: 10px; border-radius: 5px; }
+        .flash.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb;}
+        .flash.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;}
+        table { width:100%; border-collapse: collapse; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-top: 20px;}
+        th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
+        th { background-color: #e9ecef; }
+        tr:nth-child(even) { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="{{ url_for('index') }}">&laquo; Back to All Jobs</a>
+        <h1>{{ job['job_profile'].get('job_title', 'Job Details') }}</h1>
+
+        {# Flash Messages #}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="flashes">
+            {% for category, message in messages %}
+              <p class="flash {{ category }}">{{ message }}</p>
+            {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <div class="controls">
+            <a href="{{ url_for('upload_resumes', job_id=job_id) }}" class="button green">+ Upload Resumes</a>
+            {% if job.candidates %}
+            <form action="{{ url_for('run_pipeline', job_id=job_id) }}" method="post" style="display: inline;">
+                <button type="submit" class="button orange">Run Matching & Shortlisting Pipeline</button>
+            </form>
+            {% endif %}
+        </div>
+
+        <h3>Final Shortlist</h3>
+        {% if job.shortlist %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Candidate Name</th>
+                        <th>Match Score</th>
+                        <th>Reason for Shortlisting</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for candidate in job.shortlist %}
+                    <tr>
+                        <td>{{ candidate.candidate_name }}</td>
+                        <td>{{ candidate.final_match_score }}</td>
+                        <td>{{ candidate.explanation }}</td>
+                        <td>
+                            <form action="{{ url_for('schedule', job_id=job_id, candidate_index=loop.index0) }}" method="post" style="display: inline; margin-right: 5px;">
+                                <button type="submit" class="button green">Schedule</button>
+                            </form>
+                            <form action="{{ url_for('feedback', job_id=job_id, candidate_index=loop.index0, feedback_type='positive') }}" method="post" style="display: inline;">
+                                <button type="submit" class="button" title="Positive Feedback">&#128077;</button>
+                            </form>
+                            <form action="{{ url_for('feedback', job_id=job_id, candidate_index=loop.index0, feedback_type='negative') }}" method="post" style="display: inline;">
+                                <button type="submit" class="button" title="Negative Feedback">&#128078;</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p>The pipeline has not been run for this job yet, or no candidates were shortlisted.</p>
+        {% endif %}
+
+        <h3 style="margin-top: 40px;">All Loaded Candidates ({{ job.candidates|length }})</h3>
+        {% if job.candidates %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Candidate Name</th>
+                        <th>Email</th>
+                        <th>Source File</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for candidate in job.candidates %}
+                    <tr>
+                        <td>{{ candidate.candidate_name }}</td>
+                        <td>{{ candidate.contact_info.email }}</td>
+                        <td>{{ candidate.original_filename }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p>No resumes have been uploaded for this job yet.</p>
+        {% endif %}
+
+    </div>
+</body>
+</html>

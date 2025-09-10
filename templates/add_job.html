@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        h1 { color: #333; }
+        form { margin-top: 20px; }
+        textarea { width: 100%; height: 300px; }
+        button { margin-top: 10px; padding: 10px 20px; }
+    </style>
+</head>
+<body>
+    <h1>Add a New Job Description</h1>
+    <form action="{{ url_for('add_job') }}" method="post">
+        <label for="jd_text">Paste the full job description below:</label>
+        <br>
+        <textarea id="jd_text" name="jd_text" required></textarea>
+        <br>
+        <button type="submit">Submit Job Description</button>
+    </form>
+    <a href="{{ url_for('index') }}">Back to Dashboard</a>
+</body>
+</html>

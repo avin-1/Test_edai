@@ -19,15 +19,19 @@ LLM_MODEL = "openai/gpt-oss-20b:fireworks-ai" # Example LLM model for Hugging Fa
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
 if not HF_TOKEN:
-    print("ERROR: HF_TOKEN environment variable not set. Please set it before running the script.")
-    exit(1)
+    print("WARNING: HF_TOKEN environment variable not set. LLM-based parsing will fail.")
+    # In a library context, we should not exit the entire application.
+    # The functions that use the client will handle the error gracefully.
+    # exit(1)
 
 # Initialize the OpenAI client for the Hugging Face router
-client = OpenAI(
-    base_url="https://router.huggingface.co/v1",
-    api_key=HF_TOKEN,
-    timeout=60.0 # Add a timeout for API calls to prevent indefinite waits
-)
+client = None
+if HF_TOKEN:
+    client = OpenAI(
+        base_url="https://router.huggingface.co/v1",
+        api_key=HF_TOKEN,
+        timeout=60.0 # Add a timeout for API calls to prevent indefinite waits
+    )
 
 # --- Setup Directories ---
 os.makedirs(INPUT_FOLDER, exist_ok=True)
@@ -89,6 +93,9 @@ def parse_job_description_with_llm(job_description_text, max_retries=5, initial_
     Sends the job description text to the LLM to extract structured information,
     with exponential backoff for rate limit errors.
     """
+    if not client:
+        print("LLM client not initialized. Cannot parse job description.")
+        return None
     if not job_description_text:
         return None
 
@@ -160,46 +167,47 @@ class JobDescriptionHandler(FileSystemEventHandler):
 def process_job_description(pdf_path):
     """
     Handles the end-to-end processing of a new job description PDF.
+    This function now returns the structured profile data upon success.
     """
     # Wait for the file to be fully written before processing
     print(f"Waiting for file {pdf_path} to be fully written...")
     if not wait_for_file_completion(pdf_path):
         print(f"Skipping {pdf_path} as it could not be accessed after waiting.")
-        return
+        return None
 
     # 1. Extract text from PDF
     print(f"Extracting text from {pdf_path}...")
     job_text = extract_text_from_pdf(pdf_path)
     if not job_text:
         print(f"Could not extract text from {pdf_path}. Skipping.")
-        return
+        return None
 
     # 2. Parse with LLM
     print(f"Sending text to LLM for parsing...")
     structured_profile = parse_job_description_with_llm(job_text)
 
     if structured_profile:
-        # 3. Determine output filename based on job title or original filename
+        # 3. Determine output filename and save the file (maintaining original behavior)
         output_base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-        if 'job_title' in structured_profile and structured_profile['job_title']:
-            sanitized_job_title = sanitize_filename(structured_profile['job_title'])
-            final_filename = f"{sanitized_job_title}.json"
+        job_title = structured_profile.get('job_title')
+        if job_title:
+            final_filename = f"{sanitize_filename(job_title)}.json"
         else:
-            print(f"Job title not found in LLM output for {pdf_path}. Using original filename base.")
             final_filename = f"{output_base_name}_profile.json"
 
-        output_filename = os.path.join(
-            OUTPUT_FOLDER,
-            final_filename
-        )
+        output_filepath = os.path.join(OUTPUT_FOLDER, final_filename)
         try:
-            with open(output_filename, "w", encoding="utf-8") as f:
+            with open(output_filepath, "w", encoding="utf-8") as f:
                 json.dump(structured_profile, f, indent=4, ensure_ascii=False)
-            print(f"Successfully created structured job profile: {output_filename}")
+            print(f"Successfully created structured job profile: {output_filepath}")
         except Exception as e:
-            print(f"Error saving JSON file {output_filename}: {e}")
+            print(f"Error saving JSON file {output_filepath}: {e}")
+
+        # 4. Return the structured data for orchestration
+        return structured_profile
     else:
         print(f"Failed to get structured profile from LLM for {pdf_path}.")
+        return None
 
 # --- Main Execution ---
 if __name__ == "__main__":

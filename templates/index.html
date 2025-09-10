@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f4f9; }
+        h1, h2 { color: #333; }
+        .controls { margin-bottom: 20px; padding: 15px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .button { padding: 10px 15px; color: white; text-decoration: none; border-radius: 5px; margin-right: 10px; background-color: #007BFF; display: inline-block;}
+        .button.green { background-color: #28a745; }
+        .button.orange { background-color: #fd7e14; border: none; font-size: 1em; cursor: pointer; font-family: Arial, sans-serif;}
+        .flashes { list-style: none; padding: 0; }
+        .flash { padding: 10px; margin-bottom: 10px; border-radius: 5px; }
+        .flash.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb;}
+        .flash.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;}
+        table { width:100%; border-collapse: collapse; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
+        th { background-color: #e9ecef; }
+        tr:nth-child(even) { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+    <h1>HR Recruitment Dashboard</h1>
+
+    {# Flash Messages #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flashes">
+        {% for category, message in messages %}
+          <p class="flash {{ category }}">{{ message }}</p>
+        {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <div class="controls">
+        <a href="{{ url_for('add_job') }}" class="button">+ Add New Job</a>
+    </div>
+
+    <h2>All Jobs</h2>
+    {% if jobs %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Job Title</th>
+                    <th>Date Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in jobs %}
+                <tr>
+                    <td>{{ job.title }}</td>
+                    <td>{{ job.created_at_formatted }}</td>
+                    <td>
+                        <a href="{{ url_for('job_view', job_id=job.id) }}" class="button green">View Details</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No jobs found. Click 'Add New Job' to get started.</p>
+    {% endif %}
+</body>
+</html>
