@@ -3,15 +3,15 @@ import json
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer, util
-from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity # <-- This import was missing
 
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 JOB_PROFILE_DIR = os.path.join(SCRIPT_DIR, "input/job_profiles")
 CANDIDATE_PROFILES_DIR = os.path.join(SCRIPT_DIR, "input/candidate_profiles")
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, "output")
-MODEL_NAME = 'all-MiniLM-L6-v2' # A good starting model for semantic similarity
+MODEL_NAME = 'all-MiniLM-L6-v2'  # A good starting model for semantic similarity
 
 # Ensure directories exist
 os.makedirs(JOB_PROFILE_DIR, exist_ok=True)
@@ -64,15 +64,8 @@ def get_candidate_profiles():
 
 def calculate_keyword_match_score(job_skills, candidate_skills):
     """
-    Calculates a match score based on shared keywords (skills).
-    Uses a simple intersection over union (Jaccard similarity) approach.
+    Calculates a match score using TF-IDF.
     """
-    if not candidate_skills or not job_skills:
-        return 0.0
-
-    # Ensure skills are in a consistent format (lowercase list of strings)
-    job_skills_set = set(skill.lower() for skill in job_skills)
-
     # Candidate skills might be in a nested dictionary
     candidate_skill_list = []
     if isinstance(candidate_skills, dict):
@@ -82,27 +75,28 @@ def calculate_keyword_match_score(job_skills, candidate_skills):
     elif isinstance(candidate_skills, list):
         candidate_skill_list = [skill.lower() for skill in candidate_skills]
 
-    candidate_skills_set = set(candidate_skill_list)
-
-    if not candidate_skills_set:
+    if not candidate_skill_list or not job_skills:
         return 0.0
 
-    intersection = job_skills_set.intersection(candidate_skills_set)
-    union = job_skills_set.union(candidate_skills_set)
-
-    return len(intersection) / len(union) if union else 0.0
+    documents = [" ".join(job_skills)] + [" ".join(candidate_skill_list)]
+    
+    vectorizer = TfidfVectorizer().fit_transform(documents)
+    
+    # Calculate cosine similarity between the job profile and candidate profile
+    # The first document is the job profile, the second is the candidate profile
+    cosine_similarity_matrix = cosine_similarity(vectorizer[0:1], vectorizer[1:])[0]
+    
+    # Return the first (and only) score
+    return cosine_similarity_matrix[0]
 
 
 def calculate_semantic_match_score(job_desc, candidate_exp):
     """
-    Calculates a semantic match score using sentence embeddings.
+    Calculates a holistic semantic match score.
     Compares the job responsibilities with the candidate's work experience.
     """
     if not job_desc or not candidate_exp:
         return 0.0
-
-    # Join lists of strings into single documents
-    job_doc = " ".join(job_desc)
 
     # Candidate experience is a list of dicts or strings, filter out empty ones
     candidate_docs = []
@@ -115,16 +109,16 @@ def calculate_semantic_match_score(job_desc, candidate_exp):
     if not candidate_docs:
         return 0.0
 
-    # Create embeddings
-    job_embedding = model.encode(job_doc, convert_to_tensor=True)
+    # Create embeddings for both job responsibilities and all candidate experience chunks
+    job_embeddings = model.encode(job_desc, convert_to_tensor=True)
     candidate_embeddings = model.encode(candidate_docs, convert_to_tensor=True)
 
-    # Compute cosine similarities
-    cosine_scores = util.pytorch_cos_sim(job_embedding, candidate_embeddings)
+    # Compute a full similarity matrix comparing every job sentence to every candidate sentence
+    cosine_scores = util.pytorch_cos_sim(job_embeddings, candidate_embeddings)
 
-    # We take the max score, assuming the most relevant job experience is the best match
+    # Aggregate scores holistically by taking the average
     if cosine_scores.numel() > 0:
-        return torch.max(cosine_scores).item()
+        return torch.mean(cosine_scores).item()
     else:
         return 0.0
 
@@ -136,6 +130,13 @@ def main():
     """
     print("Starting Candidate Matching Agent...")
 
+    # Define dynamic weights based on job role
+    WEIGHTS = {
+        "Data Entry Clerk": {"keyword": 0.7, "semantic": 0.3},
+        "Senior Software Engineer": {"keyword": 0.3, "semantic": 0.7},
+        "default": {"keyword": 0.4, "semantic": 0.6}
+    }
+    
     # 1. Load data
     job_profile = get_job_profile()
     if not job_profile:
@@ -147,9 +148,13 @@ def main():
         print("No candidate profiles found. Exiting.")
         return
 
-    print(f"Loaded job profile: {job_profile.get('job_title', 'N/A')}")
+    job_title = job_profile.get('job_title', 'N/A')
+    print(f"Loaded job profile: {job_title}")
     print(f"Loaded {len(candidate_profiles)} candidate profiles.")
 
+    # Select weights based on job title, defaulting if not found
+    selected_weights = WEIGHTS.get(job_title, WEIGHTS["default"])
+    
     # 2. Process each candidate
     results = []
     job_skills = job_profile.get('required_skills', [])
@@ -167,9 +172,8 @@ def main():
         keyword_score = calculate_keyword_match_score(job_skills, candidate_skills)
         semantic_score = calculate_semantic_match_score(job_responsibilities, candidate_experience)
 
-        # Combine scores with weights
-        # We can adjust these weights based on importance
-        final_score = (0.4 * keyword_score) + (0.6 * semantic_score)
+        # Combine scores with dynamic weights
+        final_score = (selected_weights["keyword"] * keyword_score) + (selected_weights["semantic"] * semantic_score)
 
         results.append({
             "candidate_name": candidate_name,
@@ -182,7 +186,6 @@ def main():
         print(f"  - Semantic Score: {semantic_score:.2f}")
         print(f"  - Final Score: {final_score:.2f}")
 
-
     # 3. Rank candidates
     ranked_candidates = sorted(results, key=lambda x: x['final_match_score'], reverse=True)
 
@@ -193,7 +196,6 @@ def main():
 
     print(f"\nSuccessfully ranked {len(ranked_candidates)} candidates.")
     print(f"Results saved to {output_filename}")
-
 
 if __name__ == "__main__":
     # A quick check for torch, as it was problematic
