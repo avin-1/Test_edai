@@ -2,6 +2,7 @@ import os
 import time
 import json
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pymongo import MongoClient
 from dotenv import load_dotenv
@@ -60,7 +61,7 @@ def parse_jd(state: AgentState) -> AgentState:
     
     try:
         env = os.environ.copy()
-        result = subprocess.run(["python", "jdParsing.py", inp], check=True, capture_output=True, text=True, env=env)
+        result = subprocess.run([sys.executable, "jdParsing.py", inp], check=True, capture_output=True, text=True, env=env, timeout=30)
         output_file_path = result.stdout.strip()
         if output_file_path and os.path.exists(output_file_path):
             state.current_output_path = output_file_path
@@ -90,7 +91,7 @@ def store_profile(state: AgentState) -> AgentState:
         
     try:
         env = os.environ.copy()
-        subprocess.run(["python", "profileStore.py", out], check=True, env=env)
+        subprocess.run([sys.executable, "profileStore.py", out], check=True, env=env)
         print("Profile successfully stored.")
     except subprocess.CalledProcessError as e:
         print(f"Error executing profileStore.py: {e}")
@@ -124,4 +125,3 @@ if __name__ == "__main__":
         # We can pass it to the next invocation if we want to maintain state across graph runs.
         agent_state = final_state
         print("Workflow cycle finished.")
-
